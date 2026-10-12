@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+env/
+venv/
+ENV/
+
+# PyInstaller / Build
+build/
+dist/
+*.spec
+*.tar.gz
+*.zip
+
+# Local user data & configs
+config.json
+orders_meta.json
+exports/
+*.backup.xlsx

@@ -1,0 +1,123 @@
+name: Build Desktop Application (Windows & Linux)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --name "BostaOrderManager" --windowed --noconfirm --add-data "bosta_locations.json;." --add-data "Bosta_Template_Clean.xlsx;." --add-data "Bosta Upload Template AR V3.5.xlsx;." app.py
+          copy "Bosta_Template_Clean.xlsx" "dist\BostaOrderManager\"
+          copy "Bosta Upload Template AR V3.5.xlsx" "dist\BostaOrderManager\"
+          copy "bosta_locations.json" "dist\BostaOrderManager\"
+
+      - name: Compress Windows Build
+        run: |
+          powershell Compress-Archive -Path dist\BostaOrderManager -DestinationPath BostaOrderManager-Windows-x64.zip
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BostaOrderManager-Windows-x64
+          path: BostaOrderManager-Windows-x64.zip
+
+  build-linux:
+    name: Build Linux Binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --name "BostaOrderManager" --windowed --noconfirm --add-data "bosta_locations.json:." --add-data "Bosta_Template_Clean.xlsx:." --add-data "Bosta Upload Template AR V3.5.xlsx:." app.py
+          cp Bosta_Template_Clean.xlsx "Bosta Upload Template AR V3.5.xlsx" bosta_locations.json dist/BostaOrderManager/
+          tar -czvf BostaOrderManager-Linux-x64.tar.gz -C dist BostaOrderManager
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BostaOrderManager-Linux-x64
+          path: BostaOrderManager-Linux-x64.tar.gz
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: BostaOrderManager-Windows-x64
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: BostaOrderManager-Linux-x64
+
+      - name: Create or Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "Bosta Smart Order Manager v1.0.0"
+          body: |
+            ## 🚀 إطلاق مدير أوردرات بوسطة الذكي (Bosta Smart Order Manager)
+            
+            ### 📦 التحميل:
+            - **نسخة ويندوز (Windows):** قم بتحميل `BostaOrderManager-Windows-x64.zip` وفك الضغط وتشغيل `BostaOrderManager.exe`.
+            - **نسخة لينكس (Linux):** قم بتحميل `BostaOrderManager-Linux-x64.tar.gz` وفك الضغط وتشغيل `BostaOrderManager`.
+            
+            ### ✨ المميزات:
+            - تحليل رسائل العملاء الذكي واستخراج الحقول تلقائياً.
+            - كشف البيانات المتكررة فورياً في الشيت.
+            - فحص أرقام الهواتف والأرقام الناقصة وشبكات المحمول المصرية.
+            - تصدير شيت بوسطة ليوم محدد.
+            - حذف الطلبات وتفريغ الشيت للبدء من جديد.
+            - لا يحتوي على أي بيانات قديمة (شيت نظيف 100%).
+            - يعمل محلياً بدون إنترنت + دعم اختياري لـ Gemini AI.
+          files: |
+            BostaOrderManager-Windows-x64.zip
+            BostaOrderManager-Linux-x64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
