@@ -221,6 +221,33 @@ def match_city_and_area(text: str) -> Tuple[Optional[str], Optional[str]]:
     return found_city, found_area
 
 
+def clean_product_text(text: str) -> str:
+    """
+    Strips any order codes, tracking codes, SKU numbers, or reference tags from product description.
+    Ensures Column N (وصف الشحنة) contains ONLY the products and their quantities.
+    """
+    if not text:
+        return ""
+    cleaned = str(text).strip()
+    # 1. Remove bracketed codes like (كود GC-02) or (GC01) or [ORD-12] or (كود: 123)
+    cleaned = re.sub(r'[\(\[\{]\s*(?:كود(?:\s+الطلب|\s+الشحن|\s+المنتج)?|مرجع|المرجع|رمز|SKU|Code|Ref)?\s*[:=\-#]?\s*[\w\-]+\s*[\)\]\}]', '', cleaned, flags=re.IGNORECASE)
+    # 2. Remove explicit code labels and their values (e.g. كود: GC01, كود الشحن: 12345, كود الطلب: ORD-9)
+    cleaned = re.sub(r'(?:كود(?:\s+الطلب|\s+الشحن|\s+المنتج)?|مرجع|المرجع|رمز|SKU|Code|Ref)\s*[:=\-#]?\s*[\w\-]+', '', cleaned, flags=re.IGNORECASE)
+    # 3. Remove standalone SKU patterns, ORD codes, or hash tags
+    cleaned = re.sub(r'\bORD[-_]?\d+\b', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\b[A-Za-z]{1,4}[-_]?\d{1,6}\b', '', cleaned)
+    cleaned = re.sub(r'#\w+', '', cleaned)
+    # 4. Remove empty brackets
+    cleaned = re.sub(r'[\(\[\{]\s*[\)\]\}]', '', cleaned)
+    # 5. Clean up redundant spaces and separators
+    cleaned = re.sub(r'\s*([,\-،_])\s*', r' \1 ', cleaned)
+    cleaned = re.sub(r'(\s*[-_،,]\s*){2,}', ' - ', cleaned)
+    cleaned = re.sub(r'^\s*[-_:,،]\s*', '', cleaned)
+    cleaned = re.sub(r'\s*[-_:,،]\s*$', '', cleaned)
+    cleaned = ' '.join(cleaned.split()).strip()
+    return cleaned
+
+
 def parse_order_text(text: str) -> Dict[str, Any]:
     """
     Ultra-fast rule & pattern-based order extractor.
@@ -287,10 +314,10 @@ def parse_order_text(text: str) -> Dict[str, Any]:
         r'^(?:القطع|عدد القطع|الكمية|الكميه|عدد|Items|Quantity|Qty)\s*[:=\-]\s*(.+)$'
     ]
     DESC_PATTERNS = [
-        r'^(?:الوصف|الاوردر|الطلب|المنتج|المحتوى|الشحنة|وصف الشحنة|تفاصيل الاوردر|Order|Description|Package)\s*[:=\-]\s*(.+)$'
+        r'^(?:المنتجات|تفاصيل منتجات الطلب|الأصناف|الاصناف|محتويات الشحنة|محتوى الشحنة|الطلبية|الطلبيه|الوصف|الاوردر|الأوردر|الطلب|المنتج|المحتوى|الشحنة|وصف الشحنة|تفاصيل الاوردر|تفاصيل الأوردر|Order|Description|Package|Products)\s*[:=\-]\s*(.+)$'
     ]
     NOTES_PATTERNS = [
-        r'^(?:ملاحظات|الملاحظات|مرجع|كود|كود الطلب|ملحوظة|Notes|Note|Reference)\s*[:=\-]\s*(.+)$'
+        r'^(?:ملاحظات التوصيل|ملاحظات الشحن|تعليمات التوصيل|ملاحظات|الملاحظات|ملحوظة|ملاحظة|Notes|Note|Delivery Notes)\s*[:=\-]\s*(.+)$'
     ]
 
     for line in lines:
@@ -416,7 +443,7 @@ def parse_order_text(text: str) -> Dict[str, Any]:
 
         unhandled_lines.append(line)
 
-    # Filter out lines that are purely phones, prices, or common greetings from unhandled_lines
+    # Filter out lines that are purely phones, prices, codes, or common greetings from unhandled_lines
     clean_unhandled = []
     for line in unhandled_lines:
         line_clean = line.strip()
@@ -433,6 +460,11 @@ def parse_order_text(text: str) -> Dict[str, Any]:
             continue
         # Skip lines that are just items count like 'عدد 1' or 'عدد القطع 1'
         if re.match(r'^(?:عدد|العدد|عدد القطع|الكمية)?\s*\d+\s*(?:قطع|قطعة|قطع)?$', line_clean, re.IGNORECASE):
+            continue
+        # Skip lines that are codes or references (e.g. كود: GC01, كود الطلب: 123, ORD-1, #123)
+        if re.match(r'^(?:كود(?:\s+الطلب|\s+الشحن|\s+المنتج)?|مرجع|المرجع|رمز|Code|Ref|SKU)\s*[:=\-#]?\s*[\w\-]+$', line_clean, re.IGNORECASE):
+            continue
+        if re.match(r'^(?:ORD[-_]?\d+|[A-Za-z]{1,4}[-_]?\d{1,6}|#\w+)$', line_clean, re.IGNORECASE):
             continue
         clean_unhandled.append(line_clean)
     unhandled_lines = clean_unhandled
@@ -485,6 +517,13 @@ def parse_order_text(text: str) -> Dict[str, Any]:
     # If Description still empty, combine any remaining lines
     if not result["description"] and unhandled_lines:
         result["description"] = " - ".join(unhandled_lines)
+
+    # Ensure Description has ONLY products and clean of any codes
+    result["description"] = clean_product_text(result["description"])
+
+    # Ensure Notes do not contain codes
+    if result["notes"]:
+        result["notes"] = clean_product_text(result["notes"])
 
     # Fallback shipment_value to cod_amount
     if not result["shipment_value"] and result["cod_amount"]:
@@ -554,8 +593,8 @@ def parse_order_with_gemini(text: str, api_key: str) -> Dict[str, Any]:
   "landmark": "علامة مميزة إن وجدت",
   "cod_amount": "قيمة التحصيل النقدي كرقم فقط",
   "items_count": "عدد القطع كرقم فقط (الافتراضي 1)",
-  "description": "وصف المنتجات والقطع",
-  "notes": "أي ملاحظات خاصة بالتوصيل أو كود الطلب"
+  "description": "وصف المنتجات والقطع فقط بدون أي كود أو SKU أو رمز أو كود شحن",
+  "notes": "أي ملاحظات خاصة بالتوصيل فقط وممنوع وضع أي كود طلب أو كود شحن هنا"
 }}
 أرجع JSON فقط بدون أي نصوص إضافية أو شروحات."""
 
@@ -578,6 +617,13 @@ def parse_order_with_gemini(text: str, api_key: str) -> Dict[str, Any]:
                 
         if "second_phone" in parsed_json and parsed_json["second_phone"]:
             parsed_json["second_phone"] = clean_phone(parsed_json["second_phone"])
+
+        # Ensure description has ONLY products
+        parsed_json["description"] = clean_product_text(parsed_json.get("description", ""))
+        
+        # Ensure notes do not have codes
+        if parsed_json.get("notes"):
+            parsed_json["notes"] = clean_product_text(parsed_json["notes"])
 
         parsed_json["shipment_value"] = parsed_json.get("cod_amount", "")
         parsed_json["errors"] = []

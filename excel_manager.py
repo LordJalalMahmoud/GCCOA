@@ -7,6 +7,7 @@ import datetime
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side
 from typing import Dict, Any, List, Optional, Tuple
+from order_parser import clean_product_text
 
 # Base application directory
 if getattr(sys, 'frozen', False):
@@ -192,7 +193,7 @@ class ExcelManager:
                     for ex in existing:
                         issues["duplicates"].append({
                             "field": "phone",
-                            "message": f"رقم الهاتف ({p1}) مسجل مسبقاً في السطر {ex['row']} باسم '{ex['name']}' (كود: {ex['notes']})",
+                            "message": f"رقم الهاتف ({p1}) مسجل مسبقاً في السطر {ex['row']} باسم '{ex['name']}'",
                             "existing": ex
                         })
 
@@ -278,9 +279,10 @@ class ExcelManager:
             address = str(order_data.get("address", "")).strip()
             landmark = str(order_data.get("landmark", "")).strip() or None
             
-            notes = str(order_data.get("notes", "")).strip()
+            raw_notes = str(order_data.get("notes", "")).strip()
+            notes = clean_product_text(raw_notes) if raw_notes else None
             if not notes:
-                notes = self.get_next_order_code()
+                notes = None
 
             try:
                 cod_val = float(order_data.get("cod_amount", 0)) if order_data.get("cod_amount") else None
@@ -294,13 +296,18 @@ class ExcelManager:
             except ValueError:
                 items_val = 1
 
-            desc = str(order_data.get("description", "")).strip() or None
-            ref = str(order_data.get("order_reference", "")).strip() or None
+            raw_desc = str(order_data.get("description", "")).strip()
+            desc = clean_product_text(raw_desc) or None
             val_amount = cod_val if cod_val is not None else None
 
             # Date
             order_date = order_data.get("date", datetime.date.today().strftime("%Y-%m-%d"))
 
+            # Column mapping according to Bosta Template:
+            # Col 10 (J): Delivery notes only (NO code)
+            # Col 12 (L): Cash collection / COD amount (Price)
+            # Col 14 (N): Shipment description (Products only)
+            # Col 15 (O): Order reference (None - no code anywhere)
             col_map = {
                 1: name,
                 2: phone_val,
@@ -313,7 +320,7 @@ class ExcelManager:
                 12: cod_val,
                 13: items_val,
                 14: desc,
-                15: ref,
+                15: None,
                 16: val_amount
             }
 
@@ -342,15 +349,16 @@ class ExcelManager:
             # Record in metadata
             self.meta_data[str(target_row)] = {
                 "date": order_date,
-                "notes": notes,
+                "notes": notes or "",
                 "name": name,
+                "desc": desc or "",
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             self.save_metadata()
 
             self.reload()
 
-            return True, f"تمت إضافة الطلب بنجاح في السطر {target_row} برقم {notes}!", target_row
+            return True, f"تمت إضافة الطلب بنجاح في السطر {target_row}!", target_row
 
         except PermissionError:
             return False, "فشل الحفظ: ملف الإكسيل مفتوح في برنامج آخر. يرجى إغلاقه والمحاولة ثانية.", -1
@@ -457,6 +465,10 @@ class ExcelManager:
                 cod_val = ord_obj.get("cod")
                 items_val = ord_obj.get("items") or 1
 
+                export_desc = clean_product_text(ord_obj.get("desc") or "") or None
+                raw_notes = ord_obj.get("notes") or ""
+                export_notes = clean_product_text(raw_notes) or None
+
                 col_map = {
                     1: ord_obj.get("name"),
                     2: phone_val,
@@ -465,11 +477,11 @@ class ExcelManager:
                     5: ord_obj.get("area"),
                     6: ord_obj.get("address"),
                     7: ord_obj.get("landmark") or None,
-                    10: ord_obj.get("notes"),
+                    10: export_notes,
                     12: cod_val,
                     13: items_val,
-                    14: ord_obj.get("desc") or None,
-                    15: ord_obj.get("ref") or None,
+                    14: export_desc,
+                    15: None,
                     16: cod_val
                 }
 

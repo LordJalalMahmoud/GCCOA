@@ -374,8 +374,8 @@ class MainWindow(QMainWindow):
         self.orders_count_badge.setStyleSheet("background-color: #334155; padding: 6px 12px; border-radius: 6px; font-weight: bold;")
         header_layout.addWidget(self.orders_count_badge)
 
-        self.next_code_badge = QLabel("🔢 الطلب القادم: ORD-1")
-        self.next_code_badge.setStyleSheet("background-color: #ff5722; padding: 6px 12px; border-radius: 6px; font-weight: bold; color: #ffffff;")
+        self.next_code_badge = QLabel("📦 قالب بوسطة V3.5")
+        self.next_code_badge.setStyleSheet("background-color: #059669; padding: 6px 12px; border-radius: 6px; font-weight: bold; color: #ffffff;")
         header_layout.addWidget(self.next_code_badge)
 
         # Export Button in Header
@@ -560,15 +560,11 @@ class MainWindow(QMainWindow):
 
         # Row 5: Notes & Order Date
         notes_header = QHBoxLayout()
-        notes_header.addWidget(QLabel("كود الطلب / ملاحظات:"))
-        auto_ord_btn = QPushButton("توليد كود 🔢")
-        auto_ord_btn.setStyleSheet("background-color: #e2e8f0; color: #1e293b; padding: 2px 6px; font-size: 11px;")
-        auto_ord_btn.clicked.connect(lambda: self.edit_notes.setText(self.excel_manager.get_next_order_code()))
-        notes_header.addWidget(auto_ord_btn)
+        notes_header.addWidget(QLabel("ملاحظات التوصيل (اختياري):"))
         form_layout.addLayout(notes_header, 5, 0)
 
         self.edit_notes = QLineEdit()
-        self.edit_notes.setPlaceholderText("كود الطلب ORD-XXX أو ملاحظات إضافية")
+        self.edit_notes.setPlaceholderText("ملاحظات خاصة بالتوصيل فقط (إن وجدت)")
         form_layout.addWidget(self.edit_notes, 5, 1)
 
         form_layout.addWidget(QLabel("تاريخ الطلب:"), 5, 2)
@@ -602,7 +598,7 @@ class MainWindow(QMainWindow):
         
         action_bar.addWidget(QLabel("🔍 بحث:"))
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("ابحث بالاسم أو رقم التليفون أو كود الطلب أو التاريخ...")
+        self.search_input.setPlaceholderText("ابحث بالاسم أو رقم التليفون أو المنتجات أو التاريخ...")
         self.search_input.textChanged.connect(self.filter_orders_table)
         action_bar.addWidget(self.search_input)
 
@@ -632,7 +628,7 @@ class MainWindow(QMainWindow):
         self.orders_table = QTableWidget()
         self.orders_table.setColumnCount(10)
         self.orders_table.setHorizontalHeaderLabels([
-            "السطر", "كود الطلب", "التاريخ", "اسم العميل", "رقم الهاتف", "المحافظة", "المنطقة", "العنوان", "المبلغ", "القطع"
+            "السطر", "اسم العميل", "التاريخ", "المنتجات (وصف الشحنة N)", "السعر (L)", "القطع (M)", "رقم الهاتف", "المحافظة", "المنطقة", "العنوان"
         ])
         self.orders_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.orders_table.horizontalHeader().setStretchLastSection(True)
@@ -726,13 +722,8 @@ class MainWindow(QMainWindow):
         except ValueError:
             self.spin_items.setValue(1)
 
-        self.edit_desc.setText(data.get("description", ""))
-        
-        notes = data.get("notes", "")
-        if not notes:
-            notes = self.excel_manager.get_next_order_code()
-        self.edit_notes.setText(notes)
-
+        self.edit_desc.setText(data.get("description", "") or "")
+        self.edit_notes.setText(data.get("notes", "") or "")
         self.order_date_edit.setDate(QDate.currentDate())
 
     def on_city_changed(self, city_name):
@@ -884,7 +875,7 @@ class MainWindow(QMainWindow):
         ok, msg, new_row = self.excel_manager.append_order(data)
         if ok:
             self.status_bar.showMessage(msg, 6000)
-            self.show_alert("success", f"🎉 <b>تم حفظ الطلب بنجاح في السطر {new_row}!</b><br>كود الطلب: {data.get('notes')}")
+            self.show_alert("success", f"🎉 <b>تم حفظ الطلب بنجاح في السطر {new_row}!</b><br>المستلم: {data.get('name')} | السعر: {data.get('cod_amount') or '0'} ج.م")
             self.clear_for_next_order()
             self.refresh_stats_and_table()
             QMessageBox.information(self, "تم الحفظ بنجاح", msg)
@@ -899,19 +890,17 @@ class MainWindow(QMainWindow):
 
         row_idx = self.orders_table.currentRow()
         row_num_item = self.orders_table.item(row_idx, 0)
-        code_item = self.orders_table.item(row_idx, 1)
-        name_item = self.orders_table.item(row_idx, 3)
+        name_item = self.orders_table.item(row_idx, 1)
 
         if not row_num_item:
             return
 
         row_num = int(row_num_item.text())
-        code_str = code_item.text() if code_item else ""
         name_str = name_item.text() if name_item else ""
 
         reply = QMessageBox.question(
             self, "تأكيد الحذف",
-            f"هل أنت متأكد تماماً من حذف الطلب '{code_str}' الخاص بالعميل '{name_str}' (السطر {row_num}) من ملف الإكسيل؟",
+            f"هل أنت متأكد تماماً من حذف طلب العميل '{name_str}' (السطر {row_num}) من ملف الإكسيل؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -963,7 +952,7 @@ class MainWindow(QMainWindow):
         self.edit_cod.clear()
         self.spin_items.setValue(1)
         self.edit_desc.clear()
-        self.edit_notes.setText(self.excel_manager.get_next_order_code())
+        self.edit_notes.clear()
         self.edit_phone.setStyleSheet("")
         self.phone_counter_lbl.setText("0/11")
         self.order_date_edit.setDate(QDate.currentDate())
@@ -974,14 +963,8 @@ class MainWindow(QMainWindow):
 
     def refresh_stats_and_table(self):
         count = len(self.excel_manager.orders)
-        next_code = self.excel_manager.get_next_order_code()
-        
         self.orders_count_badge.setText(f"📊 إجمالي الطلبات: {count}")
-        self.next_code_badge.setText(f"🔢 الطلب القادم: {next_code}")
-        
-        if not self.edit_notes.text():
-            self.edit_notes.setText(next_code)
-
+        self.next_code_badge.setText("📦 قالب بوسطة V3.5")
         self.populate_table(self.excel_manager.orders)
 
     def populate_table(self, orders_list):
@@ -993,15 +976,15 @@ class MainWindow(QMainWindow):
 
             items = [
                 str(ord_obj.get("row", "")),
-                str(ord_obj.get("notes", "")),
-                str(ord_obj.get("date", "")),
                 str(ord_obj.get("name", "")),
+                str(ord_obj.get("date", "")),
+                str(ord_obj.get("desc", "") or "-"),
+                str(ord_obj.get("cod", "") or "-"),
+                str(ord_obj.get("items", "") or "1"),
                 str(ord_obj.get("phone", "")),
                 str(ord_obj.get("city", "")),
                 str(ord_obj.get("area", "")),
-                str(ord_obj.get("address", "")),
-                str(ord_obj.get("cod", "") or "-"),
-                str(ord_obj.get("items", "") or "1")
+                str(ord_obj.get("address", ""))
             ]
 
             for col_idx, val in enumerate(items):
@@ -1019,10 +1002,11 @@ class MainWindow(QMainWindow):
         for o in self.excel_manager.orders:
             if (q in o.get("name", "").lower() or
                 q in o.get("phone", "").lower() or
-                q in o.get("notes", "").lower() or
+                q in o.get("desc", "").lower() or
                 q in o.get("date", "").lower() or
                 q in o.get("city", "").lower() or
-                q in o.get("address", "").lower()):
+                q in o.get("address", "").lower() or
+                q in o.get("notes", "").lower()):
                 filtered.append(o)
 
         self.populate_table(filtered)
